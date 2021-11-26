@@ -9,7 +9,7 @@ import json
 import torch
 from pathlib import Path
 from albumentations import Compose
-import albumentations.augmentations.transforms as tf
+import albumentations.augmentations.geometric.transforms as tf
 
 affine_transformations = Compose(
     [
@@ -36,7 +36,7 @@ class Loader(Dataset):
         self.augment = augment
         self.experts = ['expert'+expert for expert in experts]
         self.metadata_prefix = metadata_prefix
-        self.indices_path = path.join(path.dirname(__file__), '../indices.json')
+        self.indices_path = path.join(path.dirname(__file__), 'indices.json')
         self.metadata = self._load_metadata()
         
     def __len__(self):
@@ -142,7 +142,7 @@ class JointLoader(Dataset):
         self.augment = augment
         self.experts = ['expert'+expert for expert in experts]
         self.metadata_prefix = metadata_prefix
-        self.indices_path = self.indices_path = path.join(path.dirname(__file__), '../indices.json')
+        self.indices_path = self.indices_path = path.join(path.dirname(__file__), 'indices.json')
         self.metadata = self._load_metadata()
             
     def __len__(self):
