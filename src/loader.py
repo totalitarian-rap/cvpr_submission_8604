@@ -1,4 +1,4 @@
-from os import path
+from os import path, listdir as ls
 from collections.abc import Iterable
 from typing import Tuple
 import json
@@ -11,9 +11,6 @@ from pathlib import Path
 from albumentations import Compose
 import albumentations.augmentations.transforms as tf
 
-metadata_prefix = '/ayb/vol1/datasets/chest/'
-indices_path = '/ayb/vol1/datasets/chest/indices.json'
-
 affine_transformations = Compose(
     [
         tf.ShiftScaleRotate(scale_limit=0.3),
@@ -21,32 +18,42 @@ affine_transformations = Compose(
 )
 
 class Loader(Dataset):
-    def __init__(self, projection, train, augment=False, indices=None, experts='123'):
+    def __init__(
+        self, 
+        projection:str, 
+        train:str, 
+        metadata_prefix:str,
+        augment:bool=False, 
+        experts:str ='123',
+        ):
         super().__init__()
         assert train in ['train', 'val', 'test']
         assert projection in ['PA', 'LAT', 'PA_LAT']
         assert isinstance(augment, bool)
-        assert indices is None or isinstance(indices, Iterable)
         assert experts in ['1', '2', '3', '12', '13', '23', '123']
         self.train = train
         self.projection = projection
         self.augment = augment
-        self.indices = indices
         self.experts = ['expert'+expert for expert in experts]
-        self.experts.append('norma')
+        self.metadata_prefix = metadata_prefix
+        self.indices_path = path.join(path.dirname(__file__), '../indices.json')
         self.metadata = self._load_metadata()
         
     def __len__(self):
         return len(self.metadata)
 
     def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            raise NotImplemetedError("We cannot handle slices yet!")
-        image_path = self.metadata[idx]['image_path']
-        mask_path = self.metadata[idx]['mask_path']
-        image = cv2.imread(image_path, 0)
+        path_im, path_mask = self.metadata[idx]
+        image = cv2.imread(path_im, 0)
+        image = cv2.resize(image, (512,512))
         image = self.normalize(image)
-        mask = np.load(mask_path)['mask'].astype('uint8')
+        if path_mask is not None:
+            mask = np.load(path_mask)['mask'].astype('uint8')
+            mask = cv2.resize(mask, (512,512))
+        else:
+            mask = np.zeros((512,512)).astype('uint8')
+        image = image.astype('float32')
+        mask = mask.astype('uint8')
         if self.train == 'val' or self.train == 'test':
             return image, mask
         if self.augment:
@@ -56,19 +63,33 @@ class Loader(Dataset):
         return image, mask
 
     def _load_proj_metadata(self, proj):
-        metadata_json = metadata_prefix+'Chest_'+proj+'/metadata_Chest_'+proj+'.json'
-        with open(metadata_json, 'r') as file:
-            metadata = json.load(file)
-        with open(indices_path, 'r') as file:
-            all_indices = json.load(file)
-        all_indices = [int(elem) for elem in all_indices[self.train]]
-        if self.indices is not None:
-            all_indices = [elem for elem in all_indices if elem in self.indices]
-        metadata = [
-            elem for elem in metadata.values() if elem['case_uid'] in all_indices
+        with open(self.indices_path, 'r') as file:
+            indices = json.load(file)[self.train]
+        pneu_inds = indices['pneumonia']
+        norma_inds = indices['norma']
+        all_pneu = ls(self.metadata_prefix+'images/pneumonia/')
+        all_pneu_proj = [elem for elem in all_pneu if proj.lower() in elem]
+        all_norma = ls(self.metadata_prefix+'images/norma/')
+        all_norma_proj = [elem for elem in all_norma if proj.lower() in elem]
+        metadata = list()
+        pneu_names = [
+            elem for elem in all_pneu_proj if int(elem.split('_')[0]) in pneu_inds
             ]
-        metadata = [elem for elem in metadata if elem['expert'] in self.experts]
-        return metadata
+        norma_names = [
+            elem for elem in all_norma_proj if int(elem.split('_')[0]) in norma_inds
+            ]
+        for exp in self.experts:
+            exp_path = self.metadata_prefix+'masks/'+exp+'/'
+            exp_list = [elem for elem in ls(exp_path) if proj.lower() in elem]
+            exp_list = [elem for elem in exp_list if int(elem.split('_')[0]) in pneu_inds]
+            for pneu in pneu_names:
+                case_prefix = pneu.split('.')[0]
+                mask_path = [elem for elem in exp_list if elem.startswith(case_prefix)]
+                if mask_path:
+                    case = (self.metadata_prefix+'images/pneumonia/'+pneu, exp_path+mask_path[0])
+                    metadata.append(case)
+        norma_cases = [(self.metadata_prefix+'images/norma/'+elem, None) for elem in norma_names]
+        return metadata + norma_cases
 
     def _load_metadata(self):
         if self.projection in ['PA', 'LAT']:
@@ -95,6 +116,7 @@ class Loader(Dataset):
             return image, mask
         if np.random.random() < 0.5:
             return np.fliplr(image), np.fliplr(mask)
+        return image, mask
         
     def normalize(self, images):
         mean = 138.5
@@ -107,66 +129,94 @@ class Loader(Dataset):
 
     
 class JointLoader(Dataset):
-    def __init__(self, train, augment=True, indices=None, experts='123'):
+    def __init__(
+        self, 
+        train, 
+        metadata_prefix:str,
+        augment=True, 
+        experts='123',
+        ):
         assert train in ['train', 'val', 'test']
         assert isinstance(augment, bool)
-        assert indices is None or isinstance(indices, Iterable)
         self.train = train
         self.augment = augment
-        self.indices = indices
         self.experts = ['expert'+expert for expert in experts]
-        self.experts.append('norma')
+        self.metadata_prefix = metadata_prefix
+        self.indices_path = self.indices_path = path.join(path.dirname(__file__), '../indices.json')
         self.metadata = self._load_metadata()
             
     def __len__(self):
         return len(self.metadata)
 
     def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            raise NotImplemetedError("We cannot handle slices yet!")
-        image_pa, mask_pa = self._get_item(self.metadata[idx][0], 'PA')
-        image_lat, mask_lat = self._get_item(self.metadata[idx][1], 'LAT')
-        return (image_pa, image_lat), (mask_pa, mask_lat)
+        pa, lat = self.metadata[idx]
+        im_pa, mask_pa = self._get_item(pa)
+        im_lat, mask_lat = self._get_item(lat)
+        return (im_pa, im_lat), (mask_pa, mask_lat)
 
-    def _get_item(self, metadata_elem, proj):
-        image_path = metadata_elem['image_path']
-        mask_path = metadata_elem['mask_path']
-        image = cv2.imread(image_path, 0)
-        image = self.normalize(image, proj).astype('float32')
-        mask = np.load(mask_path)['mask'].astype('uint8')
+    def _get_item(self, case):
+        path_im, path_mask = case
+        image = cv2.imread(path_im, 0)
+        image = cv2.resize(image, (512,512))
+        if path_mask is not None:
+            mask = np.load(path_mask)['mask']
+            mask = cv2.resize(mask, (512,512))
+        else:
+            mask = np.zeros((512,512))
+        image = image.astype('float32')
+        mask = mask.astype('uint8')
         if self.train == 'val' or self.train == 'test':
             return image, mask
         if self.augment:
             image, mask = self.augment_image(image, mask)
+        else:
+            image, mask = self.flip_augment_image(image, mask)
         return image, mask
         
     def _load_proj_metadata(self, proj):
-        metadata_json = metadata_prefix+'Chest_'+proj+'/metadata_Chest_'+proj+'.json'
-        with open(metadata_json, 'r') as file:
-            metadata = json.load(file)
-        with open(indices_path, 'r') as file:
-            all_indices = json.load(file)
-        all_indices = [int(elem) for elem in all_indices[self.train]]
-        if self.indices is not None:
-            all_indices = [elem for elem in all_indices if elem in self.indices]
-        metadata = [
-            elem for elem in metadata.values() if elem['case_uid'] in all_indices
+        with open(self.indices_path, 'r') as file:
+            indices = json.load(file)[self.train]
+        pneu_inds = indices['pneumonia']
+        norma_inds = indices['norma']
+        all_pneu = ls(self.metadata_prefix+'images/pneumonia/')
+        all_pneu_proj = [elem for elem in all_pneu if proj.lower() in elem]
+        all_norma = ls(self.metadata_prefix+'images/norma/')
+        all_norma_proj = [elem for elem in all_norma if proj.lower() in elem]
+        metadata = list()
+        pneu_names = [
+            elem for elem in all_pneu_proj if int(elem.split('_')[0]) in pneu_inds
             ]
-        metadata = [elem for elem in metadata if elem['expert'] in self.experts]
-        return metadata
+        norma_names = [
+            elem for elem in all_norma_proj if int(elem.split('_')[0]) in norma_inds
+            ]
+        for exp in self.experts:
+            exp_path = self.metadata_prefix+'masks/'+exp+'/'
+            exp_list = [elem for elem in ls(exp_path) if proj.lower() in elem]
+            exp_list = [elem for elem in exp_list if int(elem.split('_')[0]) in pneu_inds]
+            for pneu in pneu_names:
+                case_prefix = pneu.split('.')[0]
+                mask_path = [elem for elem in exp_list if elem.startswith(case_prefix)]
+                if mask_path:
+                    case = (self.metadata_prefix+'images/pneumonia/'+pneu, exp_path+mask_path[0])
+                    metadata.append(case)
+        norma_cases = [(self.metadata_prefix+'images/norma/'+elem, None) for elem in norma_names]
+        return metadata + norma_cases
 
     def _load_metadata(self):
         metadata_pa = self._load_proj_metadata('PA')
         metadata_lat = self._load_proj_metadata('LAT')
         pair_elems = list()
-        for elem_lat in metadata_lat:
-            expert, uid = elem_lat['expert'], elem_lat['study_uid']
-            elem_pa = [
-                    elem for elem in metadata_pa 
-                    if elem['expert'] == expert and elem['study_uid'] == uid
-                ]
-            if elem_pa:
-                pair_elems.append((elem_pa[0], elem_lat))
+        for case_pa in metadata_pa:
+            name_pa = case_pa[0].split('/')[-1]
+            name_lat = name_pa.replace('pa', 'lat')
+            status = case_pa[0].split('/')[-2]
+            if status == 'pneumonia':
+                expert = case_pa[1].split('/')[-2]
+                case_lat = [elem for elem in metadata_lat if elem[0].endswith(name_lat) and status in elem[0] and expert in elem[1]]
+            else:
+                case_lat = [elem for elem in metadata_lat if elem[0].endswith(name_lat) and status in elem[0]]
+            if case_lat:
+                pair_elems.append((case_pa, case_lat[0]))
         return pair_elems
 
     def _apply_albumentation_augment(self, image, mask) -> Tuple:
@@ -186,8 +236,7 @@ class JointLoader(Dataset):
             return image, mask
         if np.random.random() < 0.5:
             return np.fliplr(image), np.fliplr(mask)
-        return np.flipud(image), np.flipud(mask)
-        
+        return np.flipud(image), np.flipud(mask)  
 
     def normalize(self, images, proj):
         mean = 138.5
