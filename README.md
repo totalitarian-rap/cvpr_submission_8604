@@ -52,7 +52,7 @@ $DATA_DIR
 
 In the `$LOG_DIR` script will log training statistics and save checkpoints.
 
-## Dicom ppreprocessing
+## Dicom preprocessing
 
 Most studies comprise two images, namely, frontal and lateral projections. There are 30 studies of lungs without pathologies and a single study of lungs affected by pneumonia with only frontal projection. See table below:
 
