@@ -49,7 +49,8 @@ def main(args):
         default_root_dir=log_dir,
         logger=logger,
         callbacks=checkpoint_callbacks,
-        max_epochs=500
+        max_epochs=500,
+        num_sanity_val_steps=0
         )
 
     trainer.fit(model, train_loader, val_loader)
