@@ -54,7 +54,7 @@ In the `$LOG_DIR` script will log training statistics and save checkpoints.
 
 In `.src/indsices.json' we saved indices that we used in train/validation/test sets.
 
-## Dicom preprocessing
+## Dataset and Dicom preprocessing
 
 Most studies comprise two images, namely, frontal and lateral projections. There are 30 studies of lungs without pathologies and a single study of lungs affected by pneumonia with only frontal projection. See table below:
 
@@ -70,3 +70,4 @@ Masks were saved and compressed using numpy; 1 on a mask corresponds to pneumoni
 We did not make a left-right flip for the `AP` projection, the number of studies with the`AP` is not greater than 16.
 
 
+Our dataset can be found [here](https://zenodo.org/record/5732746#.YaXP_tBByUk)
