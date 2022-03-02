@@ -1,4 +1,4 @@
-# cvpr_submission_8604
+# MICCAI_submission_1285
 
 ## Run the code
 
